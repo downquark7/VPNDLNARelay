@@ -21,7 +21,6 @@ class RelayService : Service() {
     @Volatile private var http: HttpRelay? = null
     @Volatile private var ssdp: SsdpResponder? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -142,16 +141,12 @@ class RelayService : Service() {
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:relay").apply { acquire() }
         val wifi = applicationContext.getSystemService(WifiManager::class.java)
-        @Suppress("DEPRECATION")
-        wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "$packageName:relay").apply { acquire() }
         multicastLock = wifi.createMulticastLock("$packageName:relay").apply { acquire() }
     }
 
     private fun releaseLocks() {
         wakeLock?.release()
         wakeLock = null
-        wifiLock?.release()
-        wifiLock = null
         multicastLock?.release()
         multicastLock = null
     }
