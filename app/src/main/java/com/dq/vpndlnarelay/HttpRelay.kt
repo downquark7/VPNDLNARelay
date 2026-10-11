@@ -31,9 +31,6 @@ class HttpRelay(
     private val server = ServerSocket()
     private val pool: ExecutorService =
         ThreadPoolExecutor(0, MAX_CLIENTS, 60, TimeUnit.SECONDS, SynchronousQueue())
-    // Read-ahead threads; the pool size caps how many buffers exist at once.
-    private val readers: ExecutorService =
-        ThreadPoolExecutor(0, MAX_BUFFERED_STREAMS, 60, TimeUnit.SECONDS, SynchronousQueue())
 
     val port: Int get() = server.localPort
 
@@ -66,7 +63,6 @@ class HttpRelay(
         } catch (_: IOException) {
         }
         pool.shutdownNow()
-        readers.shutdownNow()
     }
 
     private fun serve(client: Socket) {
@@ -167,29 +163,19 @@ class HttpRelay(
                 }
                 out.append("Connection: close\r\n\r\n")
                 clientOut.write(out.toString().toLatin1())
-                if (hasBody) {
-                    if (length == null || length >= MIN_BUFFERED_BYTES) {
-                        stream(upstreamIn, clientOut, length ?: Long.MAX_VALUE, System.nanoTime() - requestStarted)
-                    } else {
-                        copy(upstreamIn, clientOut, length)
-                    }
-                }
+                if (hasBody) stream(upstreamIn, clientOut, length ?: Long.MAX_VALUE, System.nanoTime() - requestStarted)
             }
             clientOut.flush()
         }
     }
 
-    /** Streams a media body through a read-ahead buffer and logs one line of timings at the end. */
+    /** Streams a response body; large ones (media) get one line of timings logged at the end. */
     private fun stream(from: InputStream, to: OutputStream, limit: Long, firstByteNanos: Long) {
         val stats = StreamStats(firstByteNanos)
         try {
-            ReadAhead(READ_AHEAD_BYTES).copy(from, to, limit, stats, readers)
-        } catch (e: RejectedExecutionException) {
-            // Too many streams are already buffered; stream this one directly.
-            copy(from, to, limit)
-            return
+            copy(from, to, limit, stats)
         } finally {
-            if (stats.bytesWritten >= MIN_BUFFERED_BYTES) log(stats.summary())
+            if (stats.bytesWritten >= MIN_LOGGED_BYTES) log(stats.summary())
         }
     }
 
@@ -241,13 +227,17 @@ class HttpRelay(
         }
     }
 
-    private fun copy(from: InputStream, to: OutputStream, limit: Long) {
+    private fun copy(from: InputStream, to: OutputStream, limit: Long, stats: StreamStats? = null) {
         val buf = ByteArray(BUFFER)
         var remaining = limit
         while (remaining > 0) {
+            val readStarted = System.nanoTime()
             val n = from.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+            val readDone = System.nanoTime()
+            stats?.recordRead(readDone - readStarted)
             if (n < 0) break
             to.write(buf, 0, n)
+            stats?.recordWrite(n, System.nanoTime() - readDone)
             remaining -= n
         }
     }
@@ -266,9 +256,8 @@ class HttpRelay(
         private const val HEAD_END = "\r\n\r\n"
         private const val BUFFER = 64 * 1024
         private const val MAX_CLIENTS = 64
-        private const val MAX_BUFFERED_STREAMS = 4
-        private const val READ_AHEAD_BYTES = 4 * 1024 * 1024
-        private const val MIN_BUFFERED_BYTES = 1024 * 1024
+        // Smaller bodies are artwork, or clients probing a file before playing or after seeking.
+        private const val MIN_LOGGED_BYTES = 16 * 1024 * 1024
         private const val MAX_HEAD_BYTES = 64 * 1024
         private const val MAX_REWRITE_BYTES = 32 * 1024 * 1024
         private const val CLIENT_HEAD_TIMEOUT_MS = 30_000

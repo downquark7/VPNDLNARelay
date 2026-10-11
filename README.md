@@ -21,9 +21,6 @@ absolute URLs that only work on its own network. The app bridges both:
 - **Port detection** – the VPN side cannot use SSDP, so the app finds the server by scanning TCP
   ports for a MediaServer device description. Kodi's range (1024–2047) is tried first. The port is
   remembered and only rescanned when it stops answering.
-- **Read-ahead** – media bodies of 1 MB or more go through a 4 MB buffer filled by a second
-  thread, so a short VPN stall is covered by data that already arrived. Both threads only wake when
-  data moves; up to 4 streams are buffered at once and any beyond that stream directly.
 - **Background** – runs as a foreground service with a persistent notification and holds wake and
   multicast locks so it keeps working with the screen off. There is no Wi-Fi lock: on Android 14+
   the high-perf lock is turned into a low-latency lock, which only applies while the app is on
@@ -43,29 +40,27 @@ If the system stops the app in the background, set its battery usage to "Unrestr
 
 ## Diagnosing buffering
 
-When a media stream of 1 MB or more ends, the log shows one line of timings, for example:
+The relay passes media straight through without buffering; smooth playback relies on the client's
+own buffer, which sits after every link in the chain. When a stream of 16 MB or more ends, the log
+shows one line of timings, for example:
 
 ```
-Stream 412.3 MB in 5m 12s · avg 10.6 Mbps · VPN 23.4 Mbps · buffer empty 2% · waiting on client 80% · VPN stalls 3 (max 2.4 s, 2 covered by buffer) · first byte 340 ms
+Stream 647.2 MB in 1m 14s · avg 69.1 Mbps · waiting on server 21% · waiting on client 78% · no server stalls · first byte 38 ms
 ```
 
-- **avg** – the rate the client actually consumed, close to the video's bitrate.
-- **VPN** – how fast data arrived from the server while the relay was waiting for it. If it is
-  near or below **avg**, the VPN or server is too slow.
-- **buffer empty** – share of the stream the client was ready for data the relay did not have
-  yet. A high value means the VPN side caused the buffering.
-- **waiting on client** – share spent handing data to the client. High is normal once the
-  client's own buffer is full. If it stays high while the client buffers and **buffer empty** is
-  low, the problem is the Wi-Fi between the phone and the client.
-- **VPN stalls** – reads from the server that blocked for a second or more. A stall is
-  **covered by buffer** when the client kept receiving data throughout it and the buffer never ran
-  dry, so without the read-ahead the client would have waited. If few stalls are ever covered, the
-  buffer is not helping.
+- **avg** – the rate the client pulled data. Once its buffer is full this is close to the video's
+  bitrate.
+- **waiting on server** – share of the stream spent waiting for data from the server over the VPN.
+  If this is high while the client buffers, the VPN or server is too slow.
+- **waiting on client** – share spent handing data to the client. High is normal once the client's
+  buffer is full. If it is high while the client buffers, the Wi-Fi between the phone and the client
+  is the problem.
+- **server stalls** – reads from the server that blocked for a second or more.
 - **first byte** – time to connect to the server and receive the response head. It applies to
   every seek, because each request opens a new connection.
 
 The counters are updated a few times per 64 KB chunk and nothing runs on a timer, so measuring
-adds no wakeups.
+adds no wakeups. A Wi-Fi drop on the phone shows up as "No Wi-Fi network to share on" in the log.
 
 ## Security
 
