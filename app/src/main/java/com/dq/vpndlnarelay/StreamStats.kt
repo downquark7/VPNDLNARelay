@@ -20,6 +20,7 @@ class StreamStats(
     @Volatile private var readNanos = 0L
     @Volatile var stalls = 0; private set
     @Volatile private var longestStallNanos = 0L
+    @Volatile var coveredStalls = 0; private set
 
     @Volatile var bytesWritten = 0L; private set
     @Volatile private var writeNanos = 0L
@@ -27,12 +28,16 @@ class StreamStats(
 
     fun now(): Long = clock()
 
-    /** [n] bytes arrived from upstream after blocking for [nanos]. */
-    fun recordRead(n: Int, nanos: Long) {
+    /**
+     * [n] bytes arrived from upstream after blocking for [nanos]. [covered] means the buffer kept the
+     * client supplied for the whole wait.
+     */
+    fun recordRead(n: Int, nanos: Long, covered: Boolean = false) {
         if (n > 0) bytesRead += n
         readNanos += nanos
         if (nanos >= STALL_NANOS) {
             stalls++
+            if (covered) coveredStalls++
             if (nanos > longestStallNanos) longestStallNanos = nanos
         }
     }
@@ -59,7 +64,7 @@ class StreamStats(
         parts += "buffer empty ${percent(emptyNanos, elapsed)}"
         parts += "waiting on client ${percent(writeNanos, elapsed)}"
         parts += if (stalls == 0) "no VPN stalls"
-        else "VPN stalls $stalls (max ${seconds(longestStallNanos)})"
+        else "VPN stalls $stalls (max ${seconds(longestStallNanos)}, $coveredStalls covered by buffer)"
         parts += "first byte ${firstByteNanos / 1_000_000} ms"
         return parts.joinToString(" · ")
     }

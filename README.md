@@ -46,7 +46,7 @@ If the system stops the app in the background, set its battery usage to "Unrestr
 When a media stream of 1 MB or more ends, the log shows one line of timings, for example:
 
 ```
-Stream 412.3 MB in 5m 12s · avg 10.6 Mbps · VPN 23.4 Mbps · buffer empty 2% · waiting on client 80% · VPN stalls 3 (max 2.4 s) · first byte 340 ms
+Stream 412.3 MB in 5m 12s · avg 10.6 Mbps · VPN 23.4 Mbps · buffer empty 2% · waiting on client 80% · VPN stalls 3 (max 2.4 s, 2 covered by buffer) · first byte 340 ms
 ```
 
 - **avg** – the rate the client actually consumed, close to the video's bitrate.
@@ -57,7 +57,10 @@ Stream 412.3 MB in 5m 12s · avg 10.6 Mbps · VPN 23.4 Mbps · buffer empty 2% �
 - **waiting on client** – share spent handing data to the client. High is normal once the
   client's own buffer is full. If it stays high while the client buffers and **buffer empty** is
   low, the problem is the Wi-Fi between the phone and the client.
-- **VPN stalls** – reads from the server that blocked for a second or more.
+- **VPN stalls** – reads from the server that blocked for a second or more. A stall is
+  **covered by buffer** when the client kept receiving data throughout it and the buffer never ran
+  dry, so without the read-ahead the client would have waited. If few stalls are ever covered, the
+  buffer is not helping.
 - **first byte** – time to connect to the server and receive the response head. It applies to
   every seek, because each request opens a new connection.
 

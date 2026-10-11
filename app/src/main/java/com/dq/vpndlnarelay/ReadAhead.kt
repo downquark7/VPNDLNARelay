@@ -15,6 +15,9 @@ import kotlin.concurrent.withLock
  * Both threads block on the socket or on the buffer and are woken only by data moving, so there is
  * no polling. The reader resumes only once a full chunk of space is free, which keeps hand-offs
  * between the threads to one per chunk instead of one per write.
+ *
+ * A stall is counted as covered when the client kept receiving data throughout it and the buffer
+ * never ran dry, i.e. without the buffer the client would have been kept waiting.
  */
 class ReadAhead(private val capacity: Int, private val chunk: Int = minOf(64 * 1024, capacity)) {
     private val buf = ByteArray(capacity)
@@ -26,6 +29,8 @@ class ReadAhead(private val capacity: Int, private val chunk: Int = minOf(64 * 1
     private var eof = false
     private var closed = false
     private var error: IOException? = null
+    /** Times the client side found the buffer empty and had to wait. */
+    private var emptyWaits = 0
 
     /**
      * Copies up to [limit] bytes from [from] to [to]. The reader runs on [executor], which may throw
@@ -50,22 +55,31 @@ class ReadAhead(private val capacity: Int, private val chunk: Int = minOf(64 * 1
             while (remaining > 0) {
                 val tail: Int
                 val space: Int
+                val emptyBefore: Boolean
+                val emptyWaitsBefore: Int
                 lock.withLock {
                     while (capacity - count < chunk && !closed) notFull.await()
                     if (closed) return
                     tail = (head + count) % capacity
                     space = minOf(capacity - count, capacity - tail)
+                    emptyBefore = count == 0
+                    emptyWaitsBefore = emptyWaits
                 }
+                val writtenBefore = stats.bytesWritten
                 // The free region is only touched by this thread, so it is filled outside the lock.
                 val started = stats.now()
                 val n = from.read(buf, tail, minOf(space.toLong(), remaining).toInt())
-                stats.recordRead(n, stats.now() - started)
+                val nanos = stats.now() - started
+                val covered = lock.withLock {
+                    if (n > 0) {
+                        count += n
+                        notEmpty.signal()
+                    }
+                    !emptyBefore && emptyWaits == emptyWaitsBefore && stats.bytesWritten > writtenBefore
+                }
+                stats.recordRead(n, nanos, covered)
                 if (n < 0) break
                 remaining -= n
-                lock.withLock {
-                    count += n
-                    notEmpty.signal()
-                }
             }
         } catch (e: IOException) {
             lock.withLock { error = e }
@@ -85,6 +99,7 @@ class ReadAhead(private val capacity: Int, private val chunk: Int = minOf(64 * 1
             val n: Int
             lock.withLock {
                 if (count == 0 && !eof) {
+                    emptyWaits++
                     val waitStarted = stats.now()
                     try {
                         while (count == 0 && !eof) notEmpty.await()

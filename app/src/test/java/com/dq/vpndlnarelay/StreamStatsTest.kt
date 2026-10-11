@@ -11,14 +11,14 @@ class StreamStatsTest {
     @Test
     fun summaryReportsRatesAndShares() {
         val stats = stats(firstByteMs = 340)
-        stats.recordRead(10_000_000, 2 * S)
+        stats.recordRead(10_000_000, 2 * S, covered = true)
         stats.recordWrite(10_000_000, 5 * S)
         stats.recordEmpty(1 * S)
         now = 10 * S
 
         assertEquals(
             "Stream 10.0 MB in 10.0 s · avg 8.0 Mbps · VPN 40.0 Mbps · buffer empty 10% · " +
-                "waiting on client 50% · VPN stalls 1 (max 2.0 s) · first byte 340 ms",
+                "waiting on client 50% · VPN stalls 1 (max 2.0 s, 1 covered by buffer) · first byte 340 ms",
             stats.summary(),
         )
     }
@@ -26,14 +26,15 @@ class StreamStatsTest {
     @Test
     fun countsOnlyReadsOfAtLeastASecondAsStalls() {
         val stats = stats()
-        stats.recordRead(100, 999 * MS)
-        stats.recordRead(100, 1 * S)
+        stats.recordRead(100, 999 * MS, covered = true)
+        stats.recordRead(100, 1 * S, covered = true)
         stats.recordRead(100, 3_500 * MS)
         stats.recordRead(100, 1_200 * MS)
         now = 10 * S
 
         assertEquals(3, stats.stalls)
-        assertTrue(stats.summary(), stats.summary().contains("VPN stalls 3 (max 3.5 s)"))
+        assertEquals(1, stats.coveredStalls)
+        assertTrue(stats.summary(), stats.summary().contains("VPN stalls 3 (max 3.5 s, 1 covered by buffer)"))
     }
 
     @Test

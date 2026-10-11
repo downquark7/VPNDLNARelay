@@ -12,8 +12,10 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 class ReadAheadTest {
@@ -124,7 +126,7 @@ class ReadAheadTest {
     fun readerKeepsFillingWhileClientIsBlocked() {
         val data = Random(3).nextBytes(8_192)
         val input = ByteArrayInputStream(data)
-        val release = java.util.concurrent.CountDownLatch(1)
+        val release = CountDownLatch(1)
         val out = object : ByteArrayOutputStream() {
             override fun write(b: ByteArray, off: Int, len: Int) {
                 release.await()
@@ -141,6 +143,87 @@ class ReadAheadTest {
         copier.join(5_000)
 
         assertArrayEquals(data, out.toByteArray())
+    }
+
+    @Test(timeout = 10_000)
+    fun stallIsCoveredWhenTheClientKeepsReceivingBufferedData() {
+        val clock = AtomicLong()
+        val stats = StreamStats(0) { clock.get() }
+        val inFirstWrite = CountDownLatch(1)
+        val finishFirstWrite = CountDownLatch(1)
+        val inSecondWrite = CountDownLatch(1)
+        val finishSecondWrite = CountDownLatch(1)
+        val out = object : OutputStream() {
+            var writes = 0
+            override fun write(b: Int) = throw UnsupportedOperationException()
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                when (++writes) {
+                    1 -> { inFirstWrite.countDown(); finishFirstWrite.await() }
+                    2 -> { inSecondWrite.countDown(); finishSecondWrite.await() }
+                }
+            }
+        }
+        val input = Scripted(
+            { 4000 },
+            { inFirstWrite.await(); 2000 },
+            {
+                // The VPN stalls while the client finishes one chunk and starts on the next.
+                clock.addAndGet(2 * S)
+                finishFirstWrite.countDown()
+                inSecondWrite.await()
+                1000
+            },
+            { finishSecondWrite.countDown(); -1 },
+        )
+
+        ReadAhead(capacity = 16_384, chunk = 1024).copy(input, out, Long.MAX_VALUE, stats, executor)
+
+        assertEquals(1, stats.stalls)
+        assertEquals(1, stats.coveredStalls)
+    }
+
+    @Test(timeout = 10_000)
+    fun stallIsNotCoveredWhenTheBufferRunsDry() {
+        val clock = AtomicLong()
+        val stats = StreamStats(0) { clock.get() }
+        val input = Scripted(
+            { 1000 },
+            {
+                while (stats.bytesWritten < 1000) Thread.sleep(5)
+                Thread.sleep(100) // let the client side find the buffer empty
+                clock.addAndGet(2 * S)
+                -1
+            },
+        )
+
+        ReadAhead(capacity = 4096, chunk = 512).copy(input, ByteArrayOutputStream(), Long.MAX_VALUE, stats, executor)
+
+        assertEquals(1, stats.stalls)
+        assertEquals(0, stats.coveredStalls)
+    }
+
+    @Test(timeout = 10_000)
+    fun stallWithAnEmptyBufferIsNotCovered() {
+        val clock = AtomicLong()
+        val stats = StreamStats(0) { clock.get() }
+        val input = Scripted({ clock.addAndGet(2 * S); 1000 }, { -1 })
+
+        ReadAhead(capacity = 4096, chunk = 512).copy(input, ByteArrayOutputStream(), Long.MAX_VALUE, stats, executor)
+
+        assertEquals(1, stats.stalls)
+        assertEquals(0, stats.coveredStalls)
+    }
+
+    /** Each read runs the next step, which returns how many bytes to deliver (or -1). */
+    private class Scripted(vararg steps: () -> Int) : InputStream() {
+        private val steps = steps.iterator()
+        override fun read(): Int = throw UnsupportedOperationException()
+        override fun read(b: ByteArray, off: Int, len: Int): Int =
+            if (steps.hasNext()) steps.next()().coerceAtMost(len) else -1
+    }
+
+    private companion object {
+        const val S = 1_000_000_000L
     }
 
     /** Returns data in small, irregular pieces, like a socket. */
