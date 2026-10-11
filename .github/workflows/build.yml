@@ -11,14 +11,32 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a main build midway, or two builds could pick the same version.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # tags are needed to work out the next version
+
+      # Next version = newest vX.Y tag with Y + 1 (v1.0 -> v1.1). Tag vX.0 by hand to
+      # start a new major version. versionCode only ever increases, as Android requires.
+      - name: Work out version
+        id: version
+        run: |
+          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          latest=${latest:-v1.0}
+          major=${latest#v}; minor=${major#*.}; major=${major%%.*}
+          version="$major.$((minor + 1))"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          echo "Building version $version"
 
       # The Gradle daemon is pinned to JDK 25 (gradle/gradle-daemon-jvm.properties).
       - uses: actions/setup-java@v5
@@ -31,18 +49,24 @@ jobs:
       - name: Accept Android SDK licences
         run: |
           sdkmanager=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -n 1)
-          (yes || true) | "$sdkmanager" --licenses > /dev/null
+          (yes 2>/dev/null || true) | "$sdkmanager" --licenses > /dev/null
 
       - uses: gradle/actions/setup-gradle@v5
 
       - name: Unit tests and debug APK
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+        run: >
+          ./gradlew --no-daemon testDebugUnitTest assembleDebug
+          -PversionName=${{ steps.version.outputs.version }}
+          -PversionCode=${{ steps.version.outputs.versionCode }}
+
+      - name: Name APK
+        run: mv app/build/outputs/apk/debug/app-debug.apk "VPNDLNARelay-${{ steps.version.outputs.version }}-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v6
         with:
-          name: vpn-dlna-relay-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/*.apk
+          name: VPNDLNARelay-${{ steps.version.outputs.version }}-debug
+          path: VPNDLNARelay-*-debug.apk
           if-no-files-found: error
 
       - name: Upload test reports
@@ -52,3 +76,24 @@ jobs:
           name: test-reports
           path: app/build/reports/tests/
           if-no-files-found: ignore
+
+  release:
+    # Every successful build of main becomes a release.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: VPNDLNARelay-${{ needs.build.outputs.version }}-debug
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: >
+          gh release create "v$VERSION" "VPNDLNARelay-$VERSION-debug.apk"
+          --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"
+          --title "v$VERSION" --generate-notes

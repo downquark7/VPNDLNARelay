@@ -90,8 +90,11 @@ adds no wakeups.
 ## Building
 
 GitHub Actions builds a debug APK and runs the unit tests on every push to `main` and on pull
-requests. Download the APK from the run's page under the repository's **Actions** tab. These
-builds are signed with a throwaway debug key that differs per run, so uninstall the previous build
+requests. Each successful build of `main` is published as a release on the **Releases** page, with
+the version bumped automatically from the newest `vX.Y` tag (v1.1, v1.2, …). To start a new major
+version, tag the commit `v2.0` by hand; later builds continue from v2.1.
+
+Builds are signed with a throwaway debug key that differs per run, so uninstall the previous build
 before installing a new one.
 
 To build locally:
