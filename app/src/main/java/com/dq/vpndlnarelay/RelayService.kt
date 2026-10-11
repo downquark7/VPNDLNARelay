@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.IBinder
@@ -38,6 +39,7 @@ class RelayService : Service() {
         val host = RelayPrefs.host(this)
         val port = RelayPrefs.port(this)
         RelayState.setRunning(true)
+        RelayState.log("VPN DLNA Relay ${appVersion()} started")
         worker = thread(name = "relay-main") { relayLoop(host, port) }
         return START_STICKY
     }
@@ -106,6 +108,9 @@ class RelayService : Service() {
         RelayState.log("Lost the DLNA server at $host:${server.port}")
         stopServers()
     }
+
+    private fun appVersion(): String =
+        packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0)).versionName ?: "?"
 
     private fun report(status: String) {
         RelayState.setStatus(status)
