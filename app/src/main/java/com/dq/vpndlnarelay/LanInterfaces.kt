@@ -28,6 +28,10 @@ object LanInterfaces {
         return lan.address == local && lan.contains(peer)
     }
 
+    /** True when [peer] is one of this device's own addresses, i.e. an app on the phone. */
+    fun isOwnAddress(peer: InetAddress): Boolean =
+        peer.isLoopbackAddress || NetworkInterface.getByInetAddress(peer) != null
+
     private fun lanOf(nif: NetworkInterface): Lan? {
         if (!nif.isUp || !nif.supportsMulticast() || nif.isLoopback || nif.isPointToPoint) return null
         if (EXCLUDED_PREFIXES.any { nif.name.startsWith(it) }) return null

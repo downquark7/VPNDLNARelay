@@ -36,6 +36,18 @@ clash with the real server when both are visible.
 3. Tap **Start**. The status line shows the address the relay is shared at.
 4. Tap **Stop** in the app or in the notification to turn it off.
 
+### Only this phone
+
+Turn on **Only this phone** to share the server with apps on the phone itself (VLC, Kodi,
+BubbleUPnP…) instead of the whole Wi-Fi. Switching it while the relay runs restarts the relay.
+
+- The HTTP relay listens on `127.0.0.1` only, so nothing off the phone can connect.
+- Discovery replies only to probes sent by apps on the phone and point them at `127.0.0.1`;
+  announcements are sent with a TTL of 0 so they never leave the device.
+- Discovery still needs the phone to be on a Wi-Fi network (multicast does not run on loopback).
+  Without one, add the server in the app by the URL shown in the status line,
+  `http://127.0.0.1:49200/DeviceDescription.xml`.
+
 If the system stops the app in the background, set its battery usage to "Unrestricted".
 
 ## Diagnosing buffering
@@ -66,6 +78,7 @@ adds no wakeups. A Wi-Fi drop on the phone shows up as "No Wi-Fi network to shar
 
 - **There is no authentication.** DLNA has none, so anyone on the same Wi-Fi can browse and play
   the library while the relay is on. Do not turn it on on public or untrusted networks.
+  On such networks, use **Only this phone**.
 - The relay only serves peers on the same subnet as one of the phone's local interfaces.
   Connections arriving over cellular or the VPN are dropped, and SSDP probes from outside the
   local subnet are ignored.

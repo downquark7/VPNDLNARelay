@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -25,6 +26,7 @@ class HttpRelay(
     private val upstreamPort: Int,
     private val upstreamUuid: String,
     private val relayUuid: String,
+    private val phoneOnly: Boolean,
     private val log: (String) -> Unit,
 ) {
     private val upstreamAuthority = "$upstreamHost:$upstreamPort"
@@ -36,10 +38,12 @@ class HttpRelay(
 
     fun start() {
         server.reuseAddress = true
+        // Phone-only mode listens on loopback, so nothing off the device can even connect.
+        val address = if (phoneOnly) InetAddress.getByName(SsdpResponder.LOOPBACK) else null
         try {
-            server.bind(InetSocketAddress(PREFERRED_PORT))
+            server.bind(InetSocketAddress(address, PREFERRED_PORT))
         } catch (e: IOException) {
-            server.bind(InetSocketAddress(0))
+            server.bind(InetSocketAddress(address, 0))
         }
         thread(name = "relay-accept") {
             while (!server.isClosed) {
@@ -68,8 +72,10 @@ class HttpRelay(
     private fun serve(client: Socket) {
         try {
             client.use {
-                // The listener is on every interface; only serve peers on a local network.
-                if (!LanInterfaces.sameLan(client.localAddress, client.inetAddress)) return
+                // The LAN listener is on every interface; only serve peers on a local network.
+                val allowed = if (phoneOnly) client.inetAddress.isLoopbackAddress
+                else LanInterfaces.sameLan(client.localAddress, client.inetAddress)
+                if (!allowed) return
                 client.soTimeout = CLIENT_HEAD_TIMEOUT_MS
                 client.tcpNoDelay = true
                 val input = BufferedInputStream(client.getInputStream(), BUFFER)

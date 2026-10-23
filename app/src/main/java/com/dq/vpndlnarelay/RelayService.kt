@@ -38,9 +38,10 @@ class RelayService : Service() {
         stopWorker()
         val host = RelayPrefs.host(this)
         val port = RelayPrefs.port(this)
+        val phoneOnly = RelayPrefs.phoneOnly(this)
         RelayState.setRunning(true)
-        RelayState.log("VPN DLNA Relay ${appVersion()} started")
-        worker = thread(name = "relay-main") { relayLoop(host, port) }
+        RelayState.log("VPN DLNA Relay ${appVersion()} started" + if (phoneOnly) " (this phone only)" else "")
+        worker = thread(name = "relay-main") { relayLoop(host, port, phoneOnly) }
         return START_STICKY
     }
 
@@ -49,7 +50,7 @@ class RelayService : Service() {
         super.onDestroy()
     }
 
-    private fun relayLoop(host: String, savedPort: Int) {
+    private fun relayLoop(host: String, savedPort: Int, phoneOnly: Boolean) {
         var port = savedPort
         try {
             while (true) {
@@ -72,7 +73,7 @@ class RelayService : Service() {
                     RelayState.setDiscoveredPort(port)
                     RelayState.log("Found DLNA server on port $port")
                 }
-                serve(host, server)
+                serve(host, server, phoneOnly)
             }
         } catch (e: InterruptedException) {
             // Stopped.
@@ -82,16 +83,21 @@ class RelayService : Service() {
     }
 
     /** Runs the relay until the upstream server stops answering. */
-    private fun serve(host: String, server: ServerInfo) {
+    private fun serve(host: String, server: ServerInfo, phoneOnly: Boolean) {
         val relayUuid = UUID.nameUUIDFromBytes("vpn-dlna-relay:${server.uuid}".toByteArray()).toString()
         val sharing = "Sharing “${server.name}” ($host:${server.port})"
         try {
-            val relay = HttpRelay(host, server.port, server.uuid, relayUuid, RelayState::log).also { it.start() }
+            val relay = HttpRelay(host, server.port, server.uuid, relayUuid, phoneOnly, RelayState::log).also { it.start() }
             http = relay
-            ssdp = SsdpResponder(relayUuid, relay.port, RelayState::log) { addresses ->
+            ssdp = SsdpResponder(relayUuid, relay.port, phoneOnly, RelayState::log) { addresses ->
                 report(
-                    if (addresses.isEmpty()) "$sharing — waiting for Wi-Fi"
-                    else "$sharing at ${addresses.joinToString { "$it:${relay.port}" }}"
+                    when {
+                        // Discovery needs a LAN for multicast; the URL works without one.
+                        phoneOnly -> "$sharing on this phone only at " +
+                            "http://${SsdpResponder.LOOPBACK}:${relay.port}${Upstream.DESCRIPTION_PATH}"
+                        addresses.isEmpty() -> "$sharing — waiting for Wi-Fi"
+                        else -> "$sharing at ${addresses.joinToString { "$it:${relay.port}" }}"
+                    }
                 )
             }.also { it.start() }
         } catch (e: IOException) {

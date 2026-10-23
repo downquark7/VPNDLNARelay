@@ -16,10 +16,14 @@ import kotlin.concurrent.thread
 /**
  * Advertises the relay as a UPnP MediaServer on every local (non-VPN, non-cellular) interface and
  * answers M-SEARCH probes, pointing clients at the HTTP relay.
+ *
+ * In phone-only mode it answers only probes sent by apps on this device, points them at loopback,
+ * and sends announcements with a TTL of 0 so they never leave the device.
  */
 class SsdpResponder(
     private val uuid: String,
     private val httpPort: Int,
+    private val phoneOnly: Boolean,
     private val log: (String) -> Unit,
     private val onAddressesChanged: (List<String>) -> Unit,
 ) {
@@ -116,6 +120,7 @@ class SsdpResponder(
         if (!lines[0].startsWith("M-SEARCH")) return
         val st = lines.firstOrNull { it.startsWith("ST:", ignoreCase = true) }?.substringAfter(':')?.trim() ?: return
         val lan = lanFor(packet.address) ?: return
+        if (phoneOnly && !LanInterfaces.isOwnAddress(packet.address)) return
         val matches = if (st == "ssdp:all") targets else targets.filter { it == st }
         for (target in matches) {
             val reply = "HTTP/1.1 200 OK\r\n" +
@@ -135,7 +140,7 @@ class SsdpResponder(
         for (lan in lans) {
             MulticastSocket().use { out ->
                 out.networkInterface = lan.nif
-                out.timeToLive = 2
+                out.timeToLive = if (phoneOnly) 0 else 2
                 for (target in targets) {
                     val message = "NOTIFY * HTTP/1.1\r\n" +
                         "HOST: $GROUP:$PORT\r\n" +
@@ -152,9 +157,13 @@ class SsdpResponder(
         }
     }
 
+    // Apps on the phone send probes from its own LAN address, which is on that LAN's subnet.
     private fun lanFor(peer: InetAddress): LanInterfaces.Lan? = lans.firstOrNull { it.contains(peer) }
 
-    private fun location(lan: LanInterfaces.Lan) = "http://${lan.address.hostAddress}:$httpPort${Upstream.DESCRIPTION_PATH}"
+    private fun location(lan: LanInterfaces.Lan): String {
+        val host = if (phoneOnly) LOOPBACK else lan.address.hostAddress
+        return "http://$host:$httpPort${Upstream.DESCRIPTION_PATH}"
+    }
 
     private fun usn(target: String) = if (target.startsWith("uuid:")) target else "uuid:$uuid::$target"
 
@@ -164,6 +173,7 @@ class SsdpResponder(
             .format(Date())
 
     companion object {
+        const val LOOPBACK = "127.0.0.1"
         private const val GROUP = "239.255.255.250"
         private const val PORT = 1900
         private const val MAX_AGE = 1800
