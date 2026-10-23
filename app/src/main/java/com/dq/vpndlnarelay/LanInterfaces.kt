@@ -17,6 +17,8 @@ object LanInterfaces {
         }
     }
 
+    const val LOOPBACK = "127.0.0.1"
+
     private val EXCLUDED_PREFIXES = listOf("tun", "ppp", "wg", "rmnet", "ccmni", "dummy", "epdg", "v4-", "p2p")
 
     fun current(): List<Lan> =

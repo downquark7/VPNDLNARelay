@@ -119,15 +119,14 @@ class SsdpResponder(
         val lines = String(packet.data, 0, packet.length, Charsets.ISO_8859_1).split("\r\n")
         if (!lines[0].startsWith("M-SEARCH")) return
         val st = lines.firstOrNull { it.startsWith("ST:", ignoreCase = true) }?.substringAfter(':')?.trim() ?: return
-        val lan = lanFor(packet.address) ?: return
-        if (phoneOnly && !LanInterfaces.isOwnAddress(packet.address)) return
+        val location = locationFor(packet.address) ?: return
         val matches = if (st == "ssdp:all") targets else targets.filter { it == st }
         for (target in matches) {
             val reply = "HTTP/1.1 200 OK\r\n" +
                 "CACHE-CONTROL: max-age=$MAX_AGE\r\n" +
                 "DATE: ${httpDate()}\r\n" +
                 "EXT:\r\n" +
-                "LOCATION: ${location(lan)}\r\n" +
+                "LOCATION: $location\r\n" +
                 "SERVER: $SERVER\r\n" +
                 "ST: $target\r\n" +
                 "USN: ${usn(target)}\r\n\r\n"
@@ -138,6 +137,7 @@ class SsdpResponder(
 
     private fun notifyAll(nts: String) {
         for (lan in lans) {
+            val location = location(advertisedHost(lan))
             MulticastSocket().use { out ->
                 out.networkInterface = lan.nif
                 out.timeToLive = if (phoneOnly) 0 else 2
@@ -145,7 +145,7 @@ class SsdpResponder(
                     val message = "NOTIFY * HTTP/1.1\r\n" +
                         "HOST: $GROUP:$PORT\r\n" +
                         "CACHE-CONTROL: max-age=$MAX_AGE\r\n" +
-                        "LOCATION: ${location(lan)}\r\n" +
+                        "LOCATION: $location\r\n" +
                         "NT: $target\r\n" +
                         "NTS: $nts\r\n" +
                         "SERVER: $SERVER\r\n" +
@@ -157,13 +157,19 @@ class SsdpResponder(
         }
     }
 
-    // Apps on the phone send probes from its own LAN address, which is on that LAN's subnet.
-    private fun lanFor(peer: InetAddress): LanInterfaces.Lan? = lans.firstOrNull { it.contains(peer) }
+    /** Where to tell [peer] the relay is, or null when [peer] must not be answered at all. */
+    private fun locationFor(peer: InetAddress): String? =
+        if (phoneOnly) {
+            // Apps on the phone probe from one of its own addresses, never from another device.
+            if (LanInterfaces.isOwnAddress(peer)) location(LanInterfaces.LOOPBACK) else null
+        } else {
+            lans.firstOrNull { it.contains(peer) }?.let { location(advertisedHost(it)) }
+        }
 
-    private fun location(lan: LanInterfaces.Lan): String {
-        val host = if (phoneOnly) LOOPBACK else lan.address.hostAddress
-        return "http://$host:$httpPort${Upstream.DESCRIPTION_PATH}"
-    }
+    private fun advertisedHost(lan: LanInterfaces.Lan) =
+        if (phoneOnly) LanInterfaces.LOOPBACK else "${lan.address.hostAddress}"
+
+    private fun location(host: String) = "http://$host:$httpPort${Upstream.DESCRIPTION_PATH}"
 
     private fun usn(target: String) = if (target.startsWith("uuid:")) target else "uuid:$uuid::$target"
 
@@ -173,7 +179,6 @@ class SsdpResponder(
             .format(Date())
 
     companion object {
-        const val LOOPBACK = "127.0.0.1"
         private const val GROUP = "239.255.255.250"
         private const val PORT = 1900
         private const val MAX_AGE = 1800

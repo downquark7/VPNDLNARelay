@@ -38,15 +38,19 @@ clash with the real server when both are visible.
 
 ### Only this phone
 
-Turn on **Only this phone** to share the server with apps on the phone itself (VLC, Kodi,
-BubbleUPnP…) instead of the whole Wi-Fi. Switching it while the relay runs restarts the relay.
+Turn on **Only this phone** to serve the library to media apps on the phone itself (VLC, Kodi,
+BubbleUPnP…) instead of to the whole Wi-Fi. Switching it while the relay runs restarts the relay.
 
-- The HTTP relay listens on `127.0.0.1` only, so nothing off the phone can connect.
-- Discovery replies only to probes sent by apps on the phone and point them at `127.0.0.1`;
-  announcements are sent with a TTL of 0 so they never leave the device.
-- Discovery still needs the phone to be on a Wi-Fi network (multicast does not run on loopback).
-  Without one, add the server in the app by the URL shown in the status line,
-  `http://127.0.0.1:49200/DeviceDescription.xml`.
+- The relay listens on `127.0.0.1` only, so no other device can connect to it, whatever network
+  the phone is on.
+- SSDP answers only probes that came from one of the phone's own addresses, and points them at
+  `127.0.0.1`. Announcements go out with a TTL of 0, so they never leave the phone.
+
+Playback does not depend on discovery. The relay is always reachable at the address in the status
+line, `http://127.0.0.1:49200/DeviceDescription.xml`, which any app that can add a server by URL
+can use. Being *found* automatically does need the phone to be on a Wi-Fi network: Android only
+lets an app send the SSDP probe over a real network interface, so with no Wi-Fi the app's probe
+never leaves it and nothing discovers the relay on its own.
 
 If the system stops the app in the background, set its battery usage to "Unrestricted".
 

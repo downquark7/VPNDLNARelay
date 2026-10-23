@@ -39,7 +39,7 @@ class HttpRelay(
     fun start() {
         server.reuseAddress = true
         // Phone-only mode listens on loopback, so nothing off the device can even connect.
-        val address = if (phoneOnly) InetAddress.getByName(SsdpResponder.LOOPBACK) else null
+        val address = if (phoneOnly) InetAddress.getByName(LanInterfaces.LOOPBACK) else null
         try {
             server.bind(InetSocketAddress(address, PREFERRED_PORT))
         } catch (e: IOException) {

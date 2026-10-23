@@ -89,15 +89,17 @@ class RelayService : Service() {
         try {
             val relay = HttpRelay(host, server.port, server.uuid, relayUuid, phoneOnly, RelayState::log).also { it.start() }
             http = relay
-            ssdp = SsdpResponder(relayUuid, relay.port, phoneOnly, RelayState::log) { addresses ->
+            if (phoneOnly) {
                 report(
-                    when {
-                        // Discovery needs a LAN for multicast; the URL works without one.
-                        phoneOnly -> "$sharing on this phone only at " +
-                            "http://${SsdpResponder.LOOPBACK}:${relay.port}${Upstream.DESCRIPTION_PATH}"
-                        addresses.isEmpty() -> "$sharing — waiting for Wi-Fi"
-                        else -> "$sharing at ${addresses.joinToString { "$it:${relay.port}" }}"
-                    }
+                    "$sharing on this phone only at " +
+                        "http://${LanInterfaces.LOOPBACK}:${relay.port}${Upstream.DESCRIPTION_PATH}"
+                )
+            }
+            ssdp = SsdpResponder(relayUuid, relay.port, phoneOnly, RelayState::log) { addresses ->
+                // Phone-only mode serves on loopback, so its address does not follow the Wi-Fi.
+                if (!phoneOnly) report(
+                    if (addresses.isEmpty()) "$sharing — waiting for Wi-Fi"
+                    else "$sharing at ${addresses.joinToString { "$it:${relay.port}" }}"
                 )
             }.also { it.start() }
         } catch (e: IOException) {

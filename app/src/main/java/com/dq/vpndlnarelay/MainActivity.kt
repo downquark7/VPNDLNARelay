@@ -131,11 +131,8 @@ fun RelayScreen(modifier: Modifier = Modifier) {
                 onCheckedChange = {
                     phoneOnly = it
                     RelayPrefs.savePhoneOnly(context, it)
-                    // The listeners are bound per mode, so a running relay restarts to switch.
-                    if (RelayState.running) {
-                        save()
-                        RelayService.start(context)
-                    }
+                    // The sockets are bound per mode, so switching restarts a running relay.
+                    if (RelayState.running) RelayService.start(context)
                 },
             )
         }
