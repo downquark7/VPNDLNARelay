@@ -17,6 +17,8 @@ object LanInterfaces {
         }
     }
 
+    const val LOOPBACK = "127.0.0.1"
+
     private val EXCLUDED_PREFIXES = listOf("tun", "ppp", "wg", "rmnet", "ccmni", "dummy", "epdg", "v4-", "p2p")
 
     fun current(): List<Lan> =
@@ -27,6 +29,10 @@ object LanInterfaces {
         val lan = NetworkInterface.getByInetAddress(local)?.let { lanOf(it) } ?: return false
         return lan.address == local && lan.contains(peer)
     }
+
+    /** True when [peer] is one of this device's own addresses, i.e. an app on the phone. */
+    fun isOwnAddress(peer: InetAddress): Boolean =
+        peer.isLoopbackAddress || NetworkInterface.getByInetAddress(peer) != null
 
     private fun lanOf(nif: NetworkInterface): Lan? {
         if (!nif.isUp || !nif.supportsMulticast() || nif.isLoopback || nif.isPointToPoint) return null

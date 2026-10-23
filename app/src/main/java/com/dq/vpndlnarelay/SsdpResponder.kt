@@ -16,10 +16,14 @@ import kotlin.concurrent.thread
 /**
  * Advertises the relay as a UPnP MediaServer on every local (non-VPN, non-cellular) interface and
  * answers M-SEARCH probes, pointing clients at the HTTP relay.
+ *
+ * In phone-only mode it answers only probes sent by apps on this device, points them at loopback,
+ * and sends announcements with a TTL of 0 so they never leave the device.
  */
 class SsdpResponder(
     private val uuid: String,
     private val httpPort: Int,
+    private val phoneOnly: Boolean,
     private val log: (String) -> Unit,
     private val onAddressesChanged: (List<String>) -> Unit,
 ) {
@@ -115,14 +119,14 @@ class SsdpResponder(
         val lines = String(packet.data, 0, packet.length, Charsets.ISO_8859_1).split("\r\n")
         if (!lines[0].startsWith("M-SEARCH")) return
         val st = lines.firstOrNull { it.startsWith("ST:", ignoreCase = true) }?.substringAfter(':')?.trim() ?: return
-        val lan = lanFor(packet.address) ?: return
+        val location = locationFor(packet.address) ?: return
         val matches = if (st == "ssdp:all") targets else targets.filter { it == st }
         for (target in matches) {
             val reply = "HTTP/1.1 200 OK\r\n" +
                 "CACHE-CONTROL: max-age=$MAX_AGE\r\n" +
                 "DATE: ${httpDate()}\r\n" +
                 "EXT:\r\n" +
-                "LOCATION: ${location(lan)}\r\n" +
+                "LOCATION: $location\r\n" +
                 "SERVER: $SERVER\r\n" +
                 "ST: $target\r\n" +
                 "USN: ${usn(target)}\r\n\r\n"
@@ -133,14 +137,15 @@ class SsdpResponder(
 
     private fun notifyAll(nts: String) {
         for (lan in lans) {
+            val location = location(advertisedHost(lan))
             MulticastSocket().use { out ->
                 out.networkInterface = lan.nif
-                out.timeToLive = 2
+                out.timeToLive = if (phoneOnly) 0 else 2
                 for (target in targets) {
                     val message = "NOTIFY * HTTP/1.1\r\n" +
                         "HOST: $GROUP:$PORT\r\n" +
                         "CACHE-CONTROL: max-age=$MAX_AGE\r\n" +
-                        "LOCATION: ${location(lan)}\r\n" +
+                        "LOCATION: $location\r\n" +
                         "NT: $target\r\n" +
                         "NTS: $nts\r\n" +
                         "SERVER: $SERVER\r\n" +
@@ -152,9 +157,19 @@ class SsdpResponder(
         }
     }
 
-    private fun lanFor(peer: InetAddress): LanInterfaces.Lan? = lans.firstOrNull { it.contains(peer) }
+    /** Where to tell [peer] the relay is, or null when [peer] must not be answered at all. */
+    private fun locationFor(peer: InetAddress): String? =
+        if (phoneOnly) {
+            // Apps on the phone probe from one of its own addresses, never from another device.
+            if (LanInterfaces.isOwnAddress(peer)) location(LanInterfaces.LOOPBACK) else null
+        } else {
+            lans.firstOrNull { it.contains(peer) }?.let { location(advertisedHost(it)) }
+        }
 
-    private fun location(lan: LanInterfaces.Lan) = "http://${lan.address.hostAddress}:$httpPort${Upstream.DESCRIPTION_PATH}"
+    private fun advertisedHost(lan: LanInterfaces.Lan) =
+        if (phoneOnly) LanInterfaces.LOOPBACK else "${lan.address.hostAddress}"
+
+    private fun location(host: String) = "http://$host:$httpPort${Upstream.DESCRIPTION_PATH}"
 
     private fun usn(target: String) = if (target.startsWith("uuid:")) target else "uuid:$uuid::$target"
 

@@ -45,14 +45,20 @@ object RelayPrefs {
     private const val FILE = "relay"
     private const val KEY_HOST = "host"
     private const val KEY_PORT = "port"
+    private const val KEY_PHONE_ONLY = "phone_only"
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun host(context: Context): String = prefs(context).getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
     fun port(context: Context): Int = prefs(context).getInt(KEY_PORT, 0)
+    fun phoneOnly(context: Context): Boolean = prefs(context).getBoolean(KEY_PHONE_ONLY, false)
 
     fun save(context: Context, host: String, port: Int) {
         prefs(context).edit().putString(KEY_HOST, host).putInt(KEY_PORT, port).apply()
+    }
+
+    fun savePhoneOnly(context: Context, phoneOnly: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PHONE_ONLY, phoneOnly).apply()
     }
 
     fun savePort(context: Context, port: Int) {

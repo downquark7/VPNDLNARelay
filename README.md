@@ -36,6 +36,22 @@ clash with the real server when both are visible.
 3. Tap **Start**. The status line shows the address the relay is shared at.
 4. Tap **Stop** in the app or in the notification to turn it off.
 
+### Only this phone
+
+Turn on **Only this phone** to serve the library to media apps on the phone itself (VLC, Kodi,
+BubbleUPnP…) instead of to the whole Wi-Fi. Switching it while the relay runs restarts the relay.
+
+- The relay listens on `127.0.0.1` only, so no other device can connect to it, whatever network
+  the phone is on.
+- SSDP answers only probes that came from one of the phone's own addresses, and points them at
+  `127.0.0.1`. Announcements go out with a TTL of 0, so they never leave the phone.
+
+Playback does not depend on discovery. The relay is always reachable at the address in the status
+line, `http://127.0.0.1:49200/DeviceDescription.xml`, which any app that can add a server by URL
+can use. Being *found* automatically does need the phone to be on a Wi-Fi network: Android only
+lets an app send the SSDP probe over a real network interface, so with no Wi-Fi the app's probe
+never leaves it and nothing discovers the relay on its own.
+
 If the system stops the app in the background, set its battery usage to "Unrestricted".
 
 ## Diagnosing buffering
@@ -66,6 +82,7 @@ adds no wakeups. A Wi-Fi drop on the phone shows up as "No Wi-Fi network to shar
 
 - **There is no authentication.** DLNA has none, so anyone on the same Wi-Fi can browse and play
   the library while the relay is on. Do not turn it on on public or untrusted networks.
+  On such networks, use **Only this phone**.
 - The relay only serves peers on the same subnet as one of the phone's local interfaces.
   Connections arriving over cellular or the VPN are dropped, and SSDP probes from outside the
   local subnet are ignored.

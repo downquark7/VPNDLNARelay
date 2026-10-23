@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -56,6 +58,7 @@ fun RelayScreen(modifier: Modifier = Modifier) {
     var host by remember { mutableStateOf(RelayPrefs.host(context)) }
     var port by remember { mutableStateOf(RelayPrefs.port(context).takeIf { it > 0 }?.toString().orEmpty()) }
     var scanning by remember { mutableStateOf(false) }
+    var phoneOnly by remember { mutableStateOf(RelayPrefs.phoneOnly(context)) }
 
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     LaunchedEffect(Unit) {
@@ -110,6 +113,28 @@ fun RelayScreen(modifier: Modifier = Modifier) {
                     }
                 },
             ) { Text(if (scanning) "Scanning…" else "Scan for port") }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Only this phone", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (phoneOnly) "Only apps on this phone can see the server"
+                    else "Devices on the same Wi-Fi can see the server",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(
+                checked = phoneOnly,
+                onCheckedChange = {
+                    phoneOnly = it
+                    RelayPrefs.savePhoneOnly(context, it)
+                    // The sockets are bound per mode, so switching restarts a running relay.
+                    if (RelayState.running) RelayService.start(context)
+                },
+            )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
